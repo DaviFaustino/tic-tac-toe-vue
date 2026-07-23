@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 const players = ['X', 'O']
 const winningLines = [
@@ -15,6 +15,9 @@ const winningLines = [
 
 const board = ref(Array(9).fill(''))
 const currentPlayer = ref(players[0])
+const focusedControl = ref(0)
+const squareButtons = ref([])
+const resetButton = ref(null)
 
 const winningLine = computed(() =>
   winningLines.find(([a, b, c]) => {
@@ -40,10 +43,84 @@ function playSquare(index) {
   currentPlayer.value = currentPlayer.value === players[0] ? players[1] : players[0]
 }
 
+function handleSquareClick(index) {
+  focusedControl.value = index
+  playSquare(index)
+}
+
 function resetGame() {
   board.value = Array(9).fill('')
   currentPlayer.value = players[0]
+  focusSquare(0)
 }
+
+function setSquareRef(element, index) {
+  if (element) squareButtons.value[index] = element
+}
+
+function focusCurrentControl() {
+  nextTick(() => {
+    if (focusedControl.value === 'reset') {
+      resetButton.value?.focus()
+      return
+    }
+
+    squareButtons.value[focusedControl.value]?.focus()
+  })
+}
+
+function focusSquare(index) {
+  focusedControl.value = index
+  focusCurrentControl()
+}
+
+function focusResetButton() {
+  focusedControl.value = 'reset'
+  focusCurrentControl()
+}
+
+function moveSquareFocus(key) {
+  const row = Math.floor(focusedControl.value / 3)
+  const column = focusedControl.value % 3
+
+  if (key === 'ArrowLeft') focusSquare(row * 3 + Math.max(column - 1, 0))
+  if (key === 'ArrowRight') focusSquare(row * 3 + Math.min(column + 1, 2))
+  if (key === 'ArrowUp') focusSquare(Math.max(row - 1, 0) * 3 + column)
+  if (key === 'ArrowDown') {
+    if (row === 2) focusResetButton()
+    else focusSquare((row + 1) * 3 + column)
+  }
+}
+
+function moveResetFocus(key) {
+  if (key === 'ArrowUp') focusSquare(7)
+}
+
+function handleRemoteKey(event) {
+  if (!['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Enter'].includes(event.key)) return
+
+  event.preventDefault()
+
+  if (event.key === 'Enter') {
+    if (focusedControl.value === 'reset') resetGame()
+    else playSquare(focusedControl.value)
+
+    focusCurrentControl()
+    return
+  }
+
+  if (focusedControl.value === 'reset') moveResetFocus(event.key)
+  else moveSquareFocus(event.key)
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', handleRemoteKey)
+  focusCurrentControl()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleRemoteKey)
+})
 </script>
 
 <template>
@@ -60,21 +137,34 @@ function resetGame() {
         <button
           v-for="(_, index) in board"
           :key="index"
+          :ref="(element) => setSquareRef(element, index)"
           class="square"
           :class="{
             filled: board[index],
+            selected: focusedControl === index,
             winner: winningLine?.includes(index),
           }"
           type="button"
           :aria-label="`Square ${index + 1}${board[index] ? `, ${board[index]}` : ''}`"
-          :disabled="Boolean(board[index]) || gameOver"
-          @click="playSquare(index)"
+          :aria-disabled="Boolean(board[index]) || gameOver"
+          :tabindex="focusedControl === index ? 0 : -1"
+          @click="handleSquareClick(index)"
+          @focus="focusedControl = index"
         >
           {{ board[index] }}
         </button>
       </div>
 
-      <button class="reset" type="button" @click="resetGame">Reset game</button>
+      <button
+        ref="resetButton"
+        class="reset"
+        type="button"
+        :tabindex="focusedControl === 'reset' ? 0 : -1"
+        @click="resetGame"
+        @focus="focusedControl = 'reset'"
+      >
+        Reset game
+      </button>
     </section>
   </main>
 </template>
@@ -169,15 +259,16 @@ h1 {
     color 160ms ease;
 }
 
-.square:not(:disabled):hover,
-.square:not(:disabled):focus-visible {
+.square:not([aria-disabled='true']):hover,
+.square:focus-visible,
+.square.selected {
   transform: translateY(3px);
   background: #fff8df;
   box-shadow: 0 7px 0 #17202d;
   outline: none;
 }
 
-.square:disabled {
+.square[aria-disabled='true'] {
   cursor: default;
 }
 
