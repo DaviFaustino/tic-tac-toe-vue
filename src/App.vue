@@ -19,6 +19,28 @@ const focusedControl = ref(0)
 const squareButtons = ref([])
 const resetButton = ref(null)
 
+const remoteKeyNames = {
+  ArrowLeft: 'ArrowLeft',
+  Left: 'ArrowLeft',
+  ArrowUp: 'ArrowUp',
+  Up: 'ArrowUp',
+  ArrowRight: 'ArrowRight',
+  Right: 'ArrowRight',
+  ArrowDown: 'ArrowDown',
+  Down: 'ArrowDown',
+  Enter: 'Enter',
+  OK: 'Enter',
+  Accept: 'Enter',
+}
+
+const remoteKeyCodes = {
+  13: 'Enter',
+  37: 'ArrowLeft',
+  38: 'ArrowUp',
+  39: 'ArrowRight',
+  40: 'ArrowDown',
+}
+
 const winningLine = computed(() =>
   winningLines.find(([a, b, c]) => {
     const mark = board.value[a]
@@ -96,12 +118,17 @@ function moveResetFocus(key) {
   if (key === 'ArrowUp') focusSquare(7)
 }
 
+function normalizeRemoteKey(event) {
+  return remoteKeyNames[event.key] || remoteKeyCodes[event.keyCode] || remoteKeyCodes[event.which] || ''
+}
+
 function handleRemoteKey(event) {
-  if (!['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Enter'].includes(event.key)) return
+  const key = normalizeRemoteKey(event)
+  if (!key) return
 
   event.preventDefault()
 
-  if (event.key === 'Enter') {
+  if (key === 'Enter') {
     if (focusedControl.value === 'reset') resetGame()
     else playSquare(focusedControl.value)
 
@@ -109,17 +136,17 @@ function handleRemoteKey(event) {
     return
   }
 
-  if (focusedControl.value === 'reset') moveResetFocus(event.key)
-  else moveSquareFocus(event.key)
+  if (focusedControl.value === 'reset') moveResetFocus(key)
+  else moveSquareFocus(key)
 }
 
 onMounted(() => {
-  document.addEventListener('keydown', handleRemoteKey)
+  window.addEventListener('keydown', handleRemoteKey, true)
   focusCurrentControl()
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleRemoteKey)
+  window.removeEventListener('keydown', handleRemoteKey, true)
 })
 </script>
 
@@ -191,14 +218,16 @@ onBeforeUnmount(() => {
 }
 
 .game {
-  display: grid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: 100vh;
-  place-items: center;
   padding: 2rem;
 }
 
 .panel {
-  width: min(100%, 30rem);
+  width: 30rem;
+  max-width: 100%;
   text-align: center;
 }
 
@@ -214,6 +243,7 @@ onBeforeUnmount(() => {
 h1 {
   margin: 0;
   color: #16202d;
+  font-size: 4rem;
   font-size: clamp(2.5rem, 9vw, 4.75rem);
   line-height: 0.95;
 }
@@ -232,26 +262,31 @@ h1 {
 }
 
 .board {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.7rem;
-  width: min(100%, 25rem);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: 24rem;
+  max-width: 100%;
   margin: 0 auto;
 }
 
 .square {
-  display: grid;
-  aspect-ratio: 1;
-  place-items: center;
+  display: block;
+  width: 7.2rem;
+  height: 7.2rem;
+  margin: 0.4rem;
+  padding: 0;
   border: 2px solid #17202d;
   border-radius: 8px;
   background: #ffffff;
   color: #17202d;
   box-shadow: 0 10px 0 #17202d;
   cursor: pointer;
+  font-size: 4.8rem;
   font-size: clamp(2.6rem, 16vw, 5.4rem);
   font-weight: 900;
-  line-height: 1;
+  line-height: 7.2rem;
+  text-align: center;
   transition:
     transform 160ms ease,
     box-shadow 160ms ease,
@@ -259,8 +294,14 @@ h1 {
     color 160ms ease;
 }
 
-.square:not([aria-disabled='true']):hover,
-.square:focus-visible,
+.square:not([aria-disabled='true']):hover {
+  transform: translateY(3px);
+  background: #fff8df;
+  box-shadow: 0 7px 0 #17202d;
+  outline: none;
+}
+
+.square:focus,
 .square.selected {
   transform: translateY(3px);
   background: #fff8df;
@@ -296,7 +337,7 @@ h1 {
 }
 
 .reset:hover,
-.reset:focus-visible {
+.reset:focus {
   background: #0f6d73;
   outline: none;
   transform: translateY(-2px);
@@ -308,11 +349,16 @@ h1 {
   }
 
   .board {
-    gap: 0.5rem;
+    width: 18rem;
   }
 
   .square {
+    width: 5.4rem;
+    height: 5.4rem;
+    margin: 0.3rem;
     box-shadow: 0 7px 0 #17202d;
+    font-size: 3.7rem;
+    line-height: 5.4rem;
   }
 }
 </style>
