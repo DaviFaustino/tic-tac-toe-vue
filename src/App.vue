@@ -2,6 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 const players = ['X', 'O']
+const wallpaperEndpoint = import.meta.env.VITE_WALLPAPER_ENDPOINT || 'https://picsum.photos/1920/1080'
+const wallpaperCacheName = 'tic-tac-toe-wallpaper-v1'
+const wallpaperCacheUrl = `${window.location.origin}/cached-wallpaper`
+const wallpaperLocalStorageKey = 'tic-tac-toe-wallpaper'
 const winningLines = [
   [0, 1, 2],
   [3, 4, 5],
@@ -18,6 +22,11 @@ const currentPlayer = ref(players[0])
 const focusedControl = ref(0)
 const squareButtons = ref([])
 const resetButton = ref(null)
+const wallpaperButton = ref(null)
+const wallpaperUrl = ref('')
+const wallpaperStatus = ref('')
+const isWallpaperLoading = ref(false)
+let wallpaperObjectUrl = ''
 
 const remoteKeyNames = {
   ArrowLeft: 'ArrowLeft',
@@ -58,6 +67,14 @@ const statusMessage = computed(() => {
   return `${currentPlayer.value}'s turn`
 })
 
+const gameClasses = computed(() => ({
+  'has-wallpaper': Boolean(wallpaperUrl.value),
+}))
+
+const wallpaperStyle = computed(() =>
+  wallpaperUrl.value ? { '--wallpaper-image': `url("${wallpaperUrl.value}")` } : {},
+)
+
 function playSquare(index) {
   if (board.value[index] || gameOver.value) return
 
@@ -87,6 +104,11 @@ function focusCurrentControl() {
       return
     }
 
+    if (focusedControl.value === 'wallpaper') {
+      wallpaperButton.value?.focus()
+      return
+    }
+
     squareButtons.value[focusedControl.value]?.focus()
   })
 }
@@ -98,6 +120,11 @@ function focusSquare(index) {
 
 function focusResetButton() {
   focusedControl.value = 'reset'
+  focusCurrentControl()
+}
+
+function focusWallpaperButton() {
+  focusedControl.value = 'wallpaper'
   focusCurrentControl()
 }
 
@@ -116,6 +143,11 @@ function moveSquareFocus(key) {
 
 function moveResetFocus(key) {
   if (key === 'ArrowUp') focusSquare(7)
+  if (key === 'ArrowDown') focusWallpaperButton()
+}
+
+function moveWallpaperFocus(key) {
+  if (key === 'ArrowUp') focusResetButton()
 }
 
 function normalizeRemoteKey(event) {
@@ -130,6 +162,7 @@ function handleRemoteKey(event) {
 
   if (key === 'Enter') {
     if (focusedControl.value === 'reset') resetGame()
+    else if (focusedControl.value === 'wallpaper') fetchAndCacheWallpaper()
     else playSquare(focusedControl.value)
 
     focusCurrentControl()
@@ -137,21 +170,110 @@ function handleRemoteKey(event) {
   }
 
   if (focusedControl.value === 'reset') moveResetFocus(key)
+  else if (focusedControl.value === 'wallpaper') moveWallpaperFocus(key)
   else moveSquareFocus(key)
+}
+
+function supportsCacheStorage() {
+  return 'caches' in window
+}
+
+function setWallpaperFromBlob(blob) {
+  if (wallpaperObjectUrl) URL.revokeObjectURL(wallpaperObjectUrl)
+
+  wallpaperObjectUrl = URL.createObjectURL(blob)
+  wallpaperUrl.value = wallpaperObjectUrl
+}
+
+async function saveWallpaperResponse(response) {
+  if (supportsCacheStorage()) {
+    try {
+      const cache = await caches.open(wallpaperCacheName)
+      await cache.put(wallpaperCacheUrl, response.clone())
+      return
+    } catch {
+      // Fall through to localStorage for engines that expose caches but reject writes.
+    }
+  }
+
+  localStorage.setItem(wallpaperLocalStorageKey, await blobToDataUrl(await response.blob()))
+}
+
+async function loadCachedWallpaper() {
+  if (supportsCacheStorage()) {
+    try {
+      const cache = await caches.open(wallpaperCacheName)
+      const response = await cache.match(wallpaperCacheUrl)
+
+      if (response) {
+        setWallpaperFromBlob(await response.blob())
+        wallpaperStatus.value = 'Using cached wallpaper.'
+        return
+      }
+    } catch {
+      // Fall back to localStorage below.
+    }
+  }
+
+  const dataUrl = localStorage.getItem(wallpaperLocalStorageKey)
+  if (!dataUrl) return
+
+  wallpaperUrl.value = dataUrl
+  wallpaperStatus.value = 'Using saved wallpaper.'
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(new Error('Could not read wallpaper image.'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function fetchAndCacheWallpaper() {
+  if (isWallpaperLoading.value) return
+
+  isWallpaperLoading.value = true
+  wallpaperStatus.value = 'Fetching wallpaper...'
+
+  try {
+    const response = await fetch(wallpaperEndpoint, { cache: 'no-store' })
+
+    if (!response.ok) {
+      throw new Error(`Wallpaper request failed with ${response.status}.`)
+    }
+
+    const contentType = response.headers.get('content-type') || ''
+    if (!contentType.startsWith('image/')) {
+      throw new Error('The wallpaper endpoint did not return an image.')
+    }
+
+    await saveWallpaperResponse(response.clone())
+    setWallpaperFromBlob(await response.blob())
+    wallpaperStatus.value = 'Wallpaper saved for reuse.'
+  } catch (error) {
+    wallpaperStatus.value = error.message || 'Could not save wallpaper.'
+  } finally {
+    isWallpaperLoading.value = false
+  }
 }
 
 onMounted(() => {
   window.addEventListener('keydown', handleRemoteKey, true)
+  loadCachedWallpaper()
   focusCurrentControl()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleRemoteKey, true)
+  if (wallpaperObjectUrl) URL.revokeObjectURL(wallpaperObjectUrl)
 })
 </script>
 
 <template>
-  <main class="game">
+  <main class="game" :class="gameClasses" :style="wallpaperStyle">
     <section class="panel" aria-labelledby="game-title">
       <p class="eyebrow">Vue Tic Tac Toe</p>
       <h1 id="game-title">Tic Tac Toe</h1>
@@ -192,6 +314,22 @@ onBeforeUnmount(() => {
       >
         Reset game
       </button>
+
+      <button
+        ref="wallpaperButton"
+        class="wallpaper"
+        type="button"
+        :disabled="isWallpaperLoading"
+        :tabindex="focusedControl === 'wallpaper' ? 0 : -1"
+        @click="fetchAndCacheWallpaper"
+        @focus="focusedControl = 'wallpaper'"
+      >
+        {{ isWallpaperLoading ? 'Saving wallpaper...' : 'Fetch wallpaper' }}
+      </button>
+
+      <p v-if="wallpaperStatus" class="wallpaper-status" role="status" aria-live="polite">
+        {{ wallpaperStatus }}
+      </p>
     </section>
   </main>
 </template>
@@ -206,9 +344,6 @@ onBeforeUnmount(() => {
   min-width: 320px;
   min-height: 100vh;
   color: #18202f;
-  background:
-    radial-gradient(circle at top left, rgba(255, 196, 87, 0.2), transparent 32rem),
-    linear-gradient(135deg, #f7fbff 0%, #eef4f7 48%, #f8f1e9 100%);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -223,6 +358,18 @@ onBeforeUnmount(() => {
   justify-content: center;
   min-height: 100vh;
   padding: 2rem;
+  background:
+    radial-gradient(circle at top left, rgba(255, 196, 87, 0.2), transparent 32rem),
+    linear-gradient(135deg, #f7fbff 0%, #eef4f7 48%, #f8f1e9 100%);
+  background-position: center;
+  background-size: cover;
+  transition: background-image 240ms ease;
+}
+
+.game.has-wallpaper {
+  background-image:
+    linear-gradient(rgba(247, 251, 255, 0.66), rgba(248, 241, 233, 0.78)),
+    var(--wallpaper-image);
 }
 
 .panel {
@@ -336,11 +483,43 @@ h1 {
     background-color 160ms ease;
 }
 
+.wallpaper {
+  display: block;
+  margin: 0.8rem auto 0;
+  border: 2px solid #17202d;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #17202d;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 0.75rem 1.05rem;
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
 .reset:hover,
-.reset:focus {
+.reset:focus,
+.wallpaper:hover,
+.wallpaper:focus {
   background: #0f6d73;
+  color: #ffffff;
   outline: none;
   transform: translateY(-2px);
+}
+
+.wallpaper:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.wallpaper-status {
+  min-height: 1.4rem;
+  margin: 0.7rem 0 0;
+  color: #253447;
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 @media (max-width: 420px) {
